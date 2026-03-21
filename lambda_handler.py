@@ -15,11 +15,13 @@ import sys
 # Lambda writes to /tmp
 os.environ.setdefault("OUTPUT_DIR", "/tmp/output")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    datefmt="%H:%M:%S",
-)
+# Lambda pre-configures the root logger, so basicConfig is ignored.
+# Override the root logger directly so all modules' logging.info() calls show up.
+root = logging.getLogger()
+root.setLevel(logging.INFO)
+if root.handlers:
+    for h in root.handlers:
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
 logger = logging.getLogger(__name__)
 
 
