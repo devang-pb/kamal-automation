@@ -11,10 +11,10 @@ from urllib.parse import urljoin
 import requests
 from requests.adapters import HTTPAdapter
 
-SITE_NAME = "Sairam"
-BASE_URL = "https://sairam.cl"
-CATEGORY_PATH = "/perfume"
-OUT_CSV = "scrape_sairam.csv"
+SITE_NAME = "Paris Perfumes"
+BASE_URL = "https://www.parisperfumes.cl"
+CATEGORY_PATH = "/perfumes-1"
+OUT_CSV = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "scrape_paris.csv")
 
 MAX_WORKERS = int(os.getenv("SCRAPER_WORKERS", "12"))
 MAX_CATEGORY_PAGES = int(os.getenv("SCRAPER_MAX_CATEGORY_PAGES", "300"))
@@ -47,7 +47,7 @@ IDENTIFIER_KEYS = (
     "mpn",
 )
 
-LISTING_LINK_CLASSES = ("product-block__anchor", "product-block__name")
+LISTING_LINK_CLASSES = ("product-image",)
 RESERVED_SINGLE_SEGMENT_PATHS = {
     "search",
     "cart",
@@ -57,18 +57,15 @@ RESERVED_SINGLE_SEGMENT_PATHS = {
     "accounts",
     "register",
     "customer",
-    "perfume",
-    "marcas",
-    "accesorios",
-    "mayorista",
     "contact",
-    "sucursales",
+    "ofertas",
+    "marcas-1",
+    "perfumes-1",
+    "testers-1",
+    "estuches-1",
     "robots.txt",
 }
-DECLARED_TOTAL_RE = re.compile(
-    r"muestra\s*[0-9.,]+\s*de\s*([0-9.,]+)\s*productos",
-    re.I,
-)
+DECLARED_TOTAL_RE = re.compile(r"([0-9.,]+)\s*Producto\(s\)", re.I)
 
 
 def format_seconds(seconds: float | None) -> str:

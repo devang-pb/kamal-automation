@@ -7,7 +7,7 @@ RUN dnf install -y \
     && dnf clean all
 
 # Install Python dependencies
-COPY requirements-lambda.txt .
+COPY lambda/inventory-pipeline/requirements-lambda.txt .
 RUN pip install --no-cache-dir -r requirements-lambda.txt
 
 # Install Playwright Chromium in a fixed path accessible at runtime
@@ -15,8 +15,9 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN playwright install chromium
 
 # Copy application code
-COPY bsale_client.py bsale_session.py pull_costs.py generate_catalog.py \
-     upload_inventory.py lambda_handler.py ./
+COPY inventory/bsale_client.py inventory/bsale_session.py inventory/pull_costs.py \
+     inventory/generate_catalog.py inventory/upload_inventory.py \
+     lambda/inventory-pipeline/lambda_handler.py ./
 
 # Set Lambda handler
 CMD ["lambda_handler.handler"]

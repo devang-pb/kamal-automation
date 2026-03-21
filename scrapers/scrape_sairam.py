@@ -9,13 +9,12 @@ from html import unescape
 from urllib.parse import urljoin
 
 import requests
-
 from requests.adapters import HTTPAdapter
 
-SITE_NAME = "Lattafa Perfumes"
-BASE_URL = "https://lattafaperfumes.cl"
-CATEGORY_PATH = "/tienda/"
-OUT_CSV = "scrape_lattafa.csv"
+SITE_NAME = "Sairam"
+BASE_URL = "https://sairam.cl"
+CATEGORY_PATH = "/perfume"
+OUT_CSV = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "scrape_sairam.csv")
 
 MAX_WORKERS = int(os.getenv("SCRAPER_WORKERS", "12"))
 MAX_CATEGORY_PAGES = int(os.getenv("SCRAPER_MAX_CATEGORY_PAGES", "300"))
@@ -36,9 +35,6 @@ JSONLD_RE = re.compile(
     re.I | re.S,
 )
 
-HREF_RE = re.compile(r'href=["\']([^"\']+)["\']', re.I)
-DECLARED_TOTAL_RE = re.compile(r"de\s*([0-9.,]+)\s*resultados", re.I)
-
 IDENTIFIER_KEYS = (
     "productID",
     "gtin13",
@@ -49,6 +45,29 @@ IDENTIFIER_KEYS = (
     "barcode",
     "sku",
     "mpn",
+)
+
+LISTING_LINK_CLASSES = ("product-block__anchor", "product-block__name")
+RESERVED_SINGLE_SEGMENT_PATHS = {
+    "search",
+    "cart",
+    "checkout",
+    "login",
+    "account",
+    "accounts",
+    "register",
+    "customer",
+    "perfume",
+    "marcas",
+    "accesorios",
+    "mayorista",
+    "contact",
+    "sucursales",
+    "robots.txt",
+}
+DECLARED_TOTAL_RE = re.compile(
+    r"muestra\s*[0-9.,]+\s*de\s*([0-9.,]+)\s*productos",
+    re.I,
 )
 
 
@@ -126,44 +145,21 @@ def iter_product_jsonld_objects(html: str):
                 yield current
 
 
-def pick_first_offer(offers) -> dict:
-    if isinstance(offers, dict):
-        return offers
-    if isinstance(offers, list):
-        for item in offers:
-            if isinstance(item, dict):
-                return item
-    return {}
-
-
-def extract_price(offer: dict) -> str:
-    for key in ("price", "lowPrice", "highPrice"):
-        value = offer.get(key)
-        if value is not None and str(value).strip():
-            return str(value).strip()
-
-    price_spec = offer.get("priceSpecification")
-    specs = []
-    if isinstance(price_spec, dict):
-        specs = [price_spec]
-    elif isinstance(price_spec, list):
-        specs = [x for x in price_spec if isinstance(x, dict)]
-
-    for spec in specs:
-        for key in ("price", "minPrice", "maxPrice"):
-            value = spec.get(key)
-            if value is not None and str(value).strip():
-                return str(value).strip()
-
-    return ""
-
-
 def parse_product_row_from_html(html: str, page_url: str) -> dict | None:
     for product in iter_product_jsonld_objects(html):
-        name = ""
-        raw_name = product.get("name")
-        if raw_name is not None and str(raw_name).strip():
-            name = str(raw_name).strip()
+        offers = product.get("offers")
+        if isinstance(offers, list):
+            offers = next((x for x in offers if isinstance(x, dict)), None)
+        if not isinstance(offers, dict):
+            offers = {}
+
+        name = product.get("name")
+        if isinstance(name, str):
+            name = name.strip()
+        elif name is None:
+            name = ""
+        else:
+            name = str(name).strip()
 
         identifier = ""
         for key in IDENTIFIER_KEYS:
@@ -172,33 +168,66 @@ def parse_product_row_from_html(html: str, page_url: str) -> dict | None:
                 identifier = str(value).strip()
                 break
 
-        offer = pick_first_offer(product.get("offers"))
-        price = extract_price(offer)
-        availability = offer.get("availability")
+        price = offers.get("price")
+        availability = offers.get("availability")
 
         return {
             "name": name,
             "gtin_or_equivalent": identifier,
-            "price": price,
+            "price": "" if price is None else str(price).strip(),
             "availability": "" if availability is None else str(availability).strip(),
         }
     return None
 
 
+def extract_links_by_class(html: str, class_token: str) -> list[str]:
+    token = re.escape(class_token)
+    pattern = re.compile(
+        rf'<a[^>]*class=["\'][^"\']*{token}[^"\']*["\'][^>]*href=["\']([^"\']+)["\']'
+        rf'|<a[^>]*href=["\']([^"\']+)["\'][^>]*class=["\'][^"\']*{token}[^"\']*["\']',
+        re.I,
+    )
+
+    links = []
+    for match in pattern.finditer(html):
+        href = match.group(1) or match.group(2) or ""
+        href = unescape(href).strip()
+        if href:
+            links.append(href)
+    return links
+
+
+def is_likely_product_path(path: str) -> bool:
+    if not path.startswith("/"):
+        return False
+    if path.startswith("//"):
+        return False
+    clean = path.split("#", 1)[0].split("?", 1)[0].strip("/")
+    if not clean:
+        return False
+    if "/" in clean:
+        return False
+    if "." in clean:
+        return False
+    if clean.lower() in RESERVED_SINGLE_SEGMENT_PATHS:
+        return False
+    return True
+
+
 def extract_listing_product_urls(html: str) -> list[str]:
+    raw_links = []
+    for class_token in LISTING_LINK_CLASSES:
+        raw_links.extend(extract_links_by_class(html, class_token))
+
     out = []
     seen = set()
-    for match in HREF_RE.finditer(html):
-        href = unescape((match.group(1) or "").strip())
-        if not href:
+    for href in raw_links:
+        if not is_likely_product_path(href):
             continue
         absolute_url = urljoin(BASE_URL, href).split("#", 1)[0].split("?", 1)[0]
-        if "/producto/" not in absolute_url:
-            continue
-        if absolute_url in seen:
-            continue
-        seen.add(absolute_url)
-        out.append(absolute_url)
+        if absolute_url not in seen:
+            seen.add(absolute_url)
+            out.append(absolute_url)
     return out
 
 
@@ -218,11 +247,7 @@ def collect_category_product_urls(session: requests.Session) -> tuple[list[str],
     no_new_streak = 0
 
     for page in range(1, MAX_CATEGORY_PAGES + 1):
-        if page == 1:
-            page_url = f"{BASE_URL}{CATEGORY_PATH}"
-        else:
-            page_url = f"{BASE_URL}{CATEGORY_PATH}page/{page}/"
-
+        page_url = f"{BASE_URL}{CATEGORY_PATH}?page={page}"
         try:
             html = fetch(session, page_url)
         except Exception as exc:

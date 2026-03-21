@@ -1,3 +1,4 @@
+import os
 import csv
 import math
 import re
@@ -6,9 +7,9 @@ from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-MASTER_FILE = "output/catalog.csv"
-CATALOG_FILE = "scrape_sairam.csv"
-OUTPUT_FILE = "compare_sairam.csv"
+MASTER_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "catalog.csv")
+CATALOG_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "scrape_paris.csv")
+OUTPUT_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_paris.csv")
 
 STOPWORDS = {
     "PERFUME",
@@ -53,11 +54,22 @@ STOPWORDS = {
     "EL",
     "LOS",
     "LAS",
+    "SIN",
+    "TAPA",
+    "CAJA",
     "POUR",
-    "TESTER",
+    "HER",
+    "HIM",
     "EUA",
-    "OF",
-    "NO",
+    "INTENSE",
+    "EXTRAIT",
+    "EXTRACT",
+    "EAUDEPARFUM",
+    "EAUDETOILETTE",
+    "EAUDECOLOGNE",
+    "GEL",
+    "DUCHA",
+    "TESTER",
 }
 GENERIC_PRODUCT_TOKENS = {
     "EDITION",
@@ -66,15 +78,11 @@ GENERIC_PRODUCT_TOKENS = {
     "VERSION",
     "NUEVO",
     "NUEVA",
-    "PARFUM",
-    "PERFUME",
-    "TESTER",
 }
 BRAND_STOPWORDS = {"AND", "THE", "DE", "LA", "EL", "LE", "PERFUME", "PARFUM"}
 MALE_TOKENS = {"HOMBRE", "MEN", "MAN", "HIM"}
 FEMALE_TOKENS = {"MUJER", "WOMEN", "WOMAN", "HER", "FEMME"}
 SET_TOKENS = {"ESTUCHE", "SET", "GIFTSET"}
-ROMAN_NUMERAL_TOKENS = {"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"}
 
 
 @dataclass(frozen=True)
@@ -155,7 +163,6 @@ def is_strict_numeric_barcode(value: str) -> bool:
 def extract_ml_sizes(value: str) -> set[int]:
     text = normalize_text_ascii(value)
     sizes = {int(num) for num in re.findall(r"(\d{2,4})\s*ML\b", text)}
-
     for token in tokenize_text(value):
         match = re.fullmatch(r"(\d{2,4})ML", token)
         if match:
@@ -228,8 +235,7 @@ def extract_product_tokens(source_text: str, brand_tokens: set[str]) -> list[str
             continue
 
         if token.isdigit():
-            token_int = int(token)
-            if token_int in sizes or len(token) <= 1:
+            if int(token) in sizes or len(token) <= 1:
                 continue
             tokens_out.append(token)
             continue
@@ -238,7 +244,7 @@ def extract_product_tokens(source_text: str, brand_tokens: set[str]) -> list[str
         if size_match and int(size_match.group(1)) in sizes:
             continue
 
-        if len(token) <= 2 and token not in ROMAN_NUMERAL_TOKENS:
+        if len(token) <= 1:
             continue
 
         tokens_out.append(token)
@@ -348,6 +354,7 @@ class NameMatcher:
         query_brand_tokens = self._detect_query_brand_tokens(query_tokens_all)
         query_product_tokens = extract_product_tokens(query_name, query_brand_tokens)
         query_product_token_set = set(query_product_tokens)
+
         if not query_product_token_set:
             return "", 0.0
 
@@ -376,36 +383,26 @@ class NameMatcher:
         if not candidates:
             return "", 0.0
 
-        critical_tokens = [
+        high_info_tokens = [
             token
             for token in query_product_token_set
-            if len(token) >= 4 and self.product_token_frequency.get(token, 0) <= 15
+            if len(token) >= 3 and self.product_token_frequency.get(token, 0) <= 5
         ]
-        query_variant_tokens = [
-            token
-            for token in query_product_tokens
-            if (
-                token in ROMAN_NUMERAL_TOKENS
-                or (token.isdigit() and int(token) not in query_sizes)
-            )
-        ]
+        if high_info_tokens:
+            candidate_union: set[str] = set()
+            for product in candidates:
+                candidate_union.update(product.product_token_set)
+            if any(token not in candidate_union for token in high_info_tokens):
+                return "", 0.0
 
         query_weight_total = sum(
             1.0 / math.log2(self.product_token_frequency[token] + 2.0)
             for token in query_product_token_set
         )
 
-        scored: list[tuple[float, int, float, MasterProduct]] = []
+        scored: list[tuple[float, int, float, bool, MasterProduct]] = []
         for product in candidates:
             shared_tokens = query_product_token_set & product.product_token_set
-            min_shared_tokens = 2 if len(query_product_token_set) >= 3 else 1
-            if len(shared_tokens) < min_shared_tokens:
-                continue
-            if critical_tokens and not any(token in shared_tokens for token in critical_tokens):
-                continue
-            if query_variant_tokens and not any(token in product.product_token_set for token in query_variant_tokens):
-                continue
-
             weighted_shared = sum(
                 1.0 / math.log2(self.product_token_frequency[token] + 2.0)
                 for token in shared_tokens
@@ -429,9 +426,9 @@ class NameMatcher:
 
             attribute_score = 0.0
             if query_concentration and product.concentration and not query_concentration.isdisjoint(product.concentration):
-                attribute_score += 0.04
+                attribute_score += 0.03
             if query_sizes and product.sizes_ml and not query_sizes.isdisjoint(product.sizes_ml):
-                attribute_score += 0.04
+                attribute_score += 0.03
             if query_gender != "unknown" and product.gender != "unknown" and gender_compatible(query_gender, product.gender):
                 attribute_score += 0.02
             if query_is_tester == product.is_tester:
@@ -440,34 +437,33 @@ class NameMatcher:
                 attribute_score -= 0.03
 
             score = (
-                0.43 * weighted_coverage
-                + 0.20 * exact_coverage
+                0.41 * weighted_coverage
+                + 0.16 * exact_coverage
                 + 0.12 * jaccard
-                + 0.16 * core_similarity
-                + 0.05 * full_similarity
-                + 0.04 * brand_ratio
+                + 0.17 * core_similarity
+                + 0.08 * full_similarity
+                + 0.06 * brand_ratio
                 + attribute_score
             )
 
-            scored.append((score, len(shared_tokens), core_similarity, product))
+            scored.append((score, len(shared_tokens), core_similarity, product.is_tester, product))
 
         if not scored:
             return "", 0.0
 
         scored.sort(key=lambda item: item[0], reverse=True)
-        best_score, best_shared_count, best_core_similarity, best_product = scored[0]
+        best_score, best_shared_count, best_core_similarity, best_is_tester, best_product = scored[0]
         second_score = scored[1][0] if len(scored) > 1 else 0.0
+        second_is_tester = scored[1][3] if len(scored) > 1 else False
         gap = best_score - second_score
 
         query_token_count = len(query_product_token_set)
-        if query_token_count >= 4:
-            min_score, min_gap, min_shared, min_core = 0.82, 0.08, 2, 0.60
-        elif query_token_count == 3:
-            min_score, min_gap, min_shared, min_core = 0.85, 0.10, 2, 0.63
+        if query_token_count >= 3:
+            min_score, min_gap, min_shared, min_core = 0.72, 0.06, 2, 0.55
         elif query_token_count == 2:
-            min_score, min_gap, min_shared, min_core = 0.90, 0.13, 1, 0.72
+            min_score, min_gap, min_shared, min_core = 0.72, 0.08, 1, 0.55
         else:
-            min_score, min_gap, min_shared, min_core = 0.95, 0.16, 1, 0.80
+            min_score, min_gap, min_shared, min_core = 0.82, 0.10, 1, 0.75
 
         accepted = (
             best_score >= min_score
@@ -475,12 +471,26 @@ class NameMatcher:
             and best_shared_count >= min_shared
             and best_core_similarity >= min_core
         )
+
+        if (
+            not accepted
+            and query_is_tester
+            and best_is_tester
+            and len(scored) > 1
+            and not second_is_tester
+            and best_score >= min_score
+            and best_shared_count >= min_shared
+            and best_core_similarity >= min_core
+            and gap >= 0.03
+        ):
+            accepted = True
+
         if not accepted:
             return "", 0.0
         return best_product.barcode, best_score
 
 
-def load_sairam_prices(
+def load_paris_prices(
     path: str,
     matcher: NameMatcher,
     master_barcodes: set[str],
@@ -555,13 +565,13 @@ def main():
     master_rows = load_master_rows(MASTER_FILE)
     master_barcodes = {row.barcode for row in master_rows}
     matcher = NameMatcher(master_rows)
-    sairam_prices, sairam_availability, stats = load_sairam_prices(CATALOG_FILE, matcher, master_barcodes)
+    paris_prices, paris_availability, stats = load_paris_prices(CATALOG_FILE, matcher, master_barcodes)
 
     with open(OUTPUT_FILE, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["ean", "Sairam Price", "Sairam Availability"])
+        writer.writerow(["ean", "Paris Price", "Paris Availability"])
         for row in master_rows:
-            writer.writerow([row.barcode, sairam_prices.get(row.barcode, ""), sairam_availability.get(row.barcode, "")])
+            writer.writerow([row.barcode, paris_prices.get(row.barcode, ""), paris_availability.get(row.barcode, "")])
 
     print(
         f"Wrote {OUTPUT_FILE} "

@@ -1,11 +1,12 @@
+import os
 import csv
 import re
 from collections import defaultdict
 from difflib import SequenceMatcher
 
-MASTER_FILE = "output/catalog.csv"
-LATTAFA_FILE = "scrape_lattafa.csv"
-OUTPUT_FILE = "compare_lattafa.csv"
+MASTER_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "catalog.csv")
+LATTAFA_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "scrape_lattafa.csv")
+OUTPUT_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_lattafa.csv")
 
 # Chirag name prefixes to strip before comparison
 CHIRAG_PREFIXES = [

@@ -10,10 +10,10 @@ import requests
 # CONFIG — EDIT THESE
 # =========================
 
-MASTER_FILE = "output/catalog.csv"
+MASTER_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "catalog.csv")
 SITE_NAME = "Multimarcas Perfumes"
 SITE_URL = "https://multimarcasperfumes.cl"
-OUTPUT_FILE = "compare_multimarcas.csv"
+OUTPUT_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_multimarcas.csv")
 
 MAX_RETRIES = 5
 MAX_WORKERS = max(1, int(os.getenv("COMPARE_MAX_WORKERS", "12")))

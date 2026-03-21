@@ -43,6 +43,16 @@ def handler(event, context):
         from upload_inventory import main as upload_inventory_main
         upload_inventory_main()
 
+        # Step 4: Upload catalog.csv to S3 for the comparison pipeline
+        s3_bucket = os.environ.get("S3_BUCKET", "kamal-automation-data")
+        if s3_bucket:
+            logger.info("=== Step 4/4: uploading catalog.csv to S3 ===")
+            import boto3
+            s3 = boto3.client("s3")
+            output_dir = os.environ.get("OUTPUT_DIR", "/tmp/output")
+            s3.upload_file(f"{output_dir}/catalog.csv", s3_bucket, "catalog.csv")
+            logger.info("Uploaded catalog.csv to s3://%s/catalog.csv", s3_bucket)
+
         return {
             "statusCode": 200,
             "body": json.dumps({"message": "Pipeline completed successfully"}),

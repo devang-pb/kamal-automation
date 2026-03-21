@@ -1,20 +1,20 @@
 import csv
 import os
 
-CATALOG_FILE = "output/catalog.csv"
-OUTPUT_FILE = "output/merged_comparisons.csv"
+CATALOG_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "catalog.csv")
+OUTPUT_FILE = os.path.join(os.environ.get("OUTPUT_DIR", "output"), "merged_comparisons.csv")
 
 # (display name, compare csv file, price column, availability column)
 COMPETITORS = [
-    ("Cosmetic", "compare_cosmetic.csv", "Cosmetic Price", "Cosmetic Availability"),
-    ("Elite Perfumes", "compare_elite.csv", "Elite Perfumes Price", "Elite Perfumes Availability"),
-    ("Lodoro", "compare_lodoro.csv", "Lodoro Price", "Lodoro Availability"),
-    ("Multimarcas Perfumes", "compare_multimarcas.csv", "Multimarcas Perfumes Price", "Multimarcas Perfumes Availability"),
-    ("Productos de Lujo", "compare_productos.csv", "Productos de Lujo Price", "Productos de Lujo Availability"),
-    ("Yauras", "compare_yauras.csv", "Yauras Price", "Yauras Availability"),
-    ("Paris", "compare_paris.csv", "Paris Price", "Paris Availability"),
-    ("Sairam", "compare_sairam.csv", "Sairam Price", "Sairam Availability"),
-    ("Lattafa", "compare_lattafa.csv", "Lattafa Price", "Lattafa Availability"),
+    ("Cosmetic", os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_cosmetic.csv"), "Cosmetic Price", "Cosmetic Availability"),
+    ("Elite Perfumes", os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_elite.csv"), "Elite Perfumes Price", "Elite Perfumes Availability"),
+    ("Lodoro", os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_lodoro.csv"), "Lodoro Price", "Lodoro Availability"),
+    ("Multimarcas Perfumes", os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_multimarcas.csv"), "Multimarcas Perfumes Price", "Multimarcas Perfumes Availability"),
+    ("Productos de Lujo", os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_productos.csv"), "Productos de Lujo Price", "Productos de Lujo Availability"),
+    ("Yauras", os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_yauras.csv"), "Yauras Price", "Yauras Availability"),
+    ("Paris", os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_paris.csv"), "Paris Price", "Paris Availability"),
+    ("Sairam", os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_sairam.csv"), "Sairam Price", "Sairam Availability"),
+    ("Lattafa", os.path.join(os.environ.get("OUTPUT_DIR", "output"), "compare_lattafa.csv"), "Lattafa Price", "Lattafa Availability"),
 ]
 
 
