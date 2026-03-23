@@ -53,6 +53,17 @@ def handler(event, context):
             s3.upload_file(f"{output_dir}/catalog.csv", s3_bucket, "catalog.csv")
             logger.info("Uploaded catalog.csv to s3://%s/catalog.csv", s3_bucket)
 
+        # Step 5: Trigger comparison pipeline if this is the morning run
+        if event.get("trigger_comparison"):
+            logger.info("=== Step 5: Triggering comparison pipeline ===")
+            import boto3
+            lam = boto3.client("lambda")
+            lam.invoke(
+                FunctionName="kamal-comparison-pipeline",
+                InvocationType="Event",
+            )
+            logger.info("Comparison pipeline triggered (async)")
+
         return {
             "statusCode": 200,
             "body": json.dumps({"message": "Pipeline completed successfully"}),

@@ -116,8 +116,17 @@ def handler(event, context):
         from merge_comparisons import main as merge_main
         merge_main()
 
-        # Step 6: Upload results to S3
-        logger.info("=== Step 6: Upload results to S3 ===")
+        # Step 6: Upload to ProcWise
+        logger.info("=== Step 6: Upload retail intel to ProcWise ===")
+        try:
+            from upload_retail_intel import main as upload_retail_intel_main
+            upload_retail_intel_main()
+            logger.info("ProcWise upload completed")
+        except Exception as e:
+            logger.error("ProcWise upload failed: %s", e, exc_info=True)
+
+        # Step 7: Upload results to S3
+        logger.info("=== Step 7: Upload results to S3 ===")
         for filename in os.listdir(OUTPUT_DIR):
             if filename.endswith(".csv") and filename != "catalog.csv":
                 filepath = f"{OUTPUT_DIR}/{filename}"
@@ -135,7 +144,7 @@ def handler(event, context):
             "body": json.dumps({"message": "Comparison pipeline completed", **summary}),
         }
 
-    except Exception as e:
+    except (Exception, SystemExit) as e:
         logger.exception("Pipeline failed")
         return {
             "statusCode": 500,

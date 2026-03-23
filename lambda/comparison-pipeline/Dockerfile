@@ -9,7 +9,8 @@ COPY comparisons/compare_cosmetic.py comparisons/compare_elite.py \
      comparisons/compare_lodoro.py comparisons/compare_multimarcas.py \
      comparisons/compare_productos.py comparisons/compare_yauras.py \
      comparisons/compare_lattafa.py comparisons/compare_paris.py \
-     comparisons/compare_sairam.py comparisons/merge_comparisons.py ./
+     comparisons/compare_sairam.py comparisons/merge_comparisons.py \
+     comparisons/upload_retail_intel.py ./
 
 # Copy scraper scripts
 COPY scrapers/scrape_sairam.py scrapers/scrape_paris.py \

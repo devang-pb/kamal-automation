@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL = "https://procwise.purpleblock.ai"
-CSV_PATH = Path(__file__).parent / "merged_comparisons.csv"
+CSV_PATH = Path(os.environ.get("OUTPUT_DIR", Path(__file__).parent)) / "merged_comparisons.csv"
 
 # CSV column → payload key mapping
 COLUMN_MAP = {
@@ -48,7 +48,7 @@ def login(session: requests.Session) -> None:
     password = os.getenv("PROCWISE_PASSWORD")
     if not email or not password:
         log.error("PROCWISE_EMAIL / PROCWISE_PASSWORD not set in .env")
-        sys.exit(1)
+        raise RuntimeError("Operation failed")
 
     resp = session.post(
         f"{BASE_URL}/api/auth/login",
@@ -58,7 +58,7 @@ def login(session: requests.Session) -> None:
     data = resp.json()
     if not data.get("success"):
         log.error("Login failed: %s", data)
-        sys.exit(1)
+        raise RuntimeError("Operation failed")
     log.info("Logged in (userId: %s)", data["userId"])
 
 
@@ -80,13 +80,13 @@ def upload_retail_intel(session: requests.Session, items: list[dict]) -> None:
         log.info("Upload successful: %s", data["message"])
     else:
         log.error("Upload failed: %s", data)
-        sys.exit(1)
+        raise RuntimeError("Operation failed")
 
 
 def main() -> None:
     if not CSV_PATH.exists():
         log.error("CSV not found: %s", CSV_PATH)
-        sys.exit(1)
+        raise RuntimeError("Operation failed")
 
     with open(CSV_PATH, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))

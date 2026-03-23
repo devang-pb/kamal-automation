@@ -1,0 +1,95 @@
+name: Deploy Lambdas
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "021891608382"
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      inventory: ${{ steps.changes.outputs.inventory }}
+      comparison: ${{ steps.changes.outputs.comparison }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            inventory:
+              - 'inventory/**'
+              - 'lambda/inventory-pipeline/**'
+            comparison:
+              - 'comparisons/**'
+              - 'scrapers/**'
+              - 'lambda/comparison-pipeline/**'
+
+  deploy-inventory:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.inventory == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push inventory image
+        run: |
+          IMAGE=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/kamal/inventory-pipeline:latest
+          docker build --platform linux/amd64 --provenance=false \
+            -f lambda/inventory-pipeline/Dockerfile -t $IMAGE .
+          docker push $IMAGE
+
+      - name: Update Lambda
+        run: |
+          IMAGE=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/kamal/inventory-pipeline:latest
+          aws lambda update-function-code \
+            --function-name kamal-inventory-pipeline \
+            --image-uri $IMAGE \
+            --region ${{ env.AWS_REGION }}
+          aws lambda wait function-updated-v2 \
+            --function-name kamal-inventory-pipeline \
+            --region ${{ env.AWS_REGION }}
+
+  deploy-comparison:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.comparison == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push comparison image
+        run: |
+          IMAGE=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/kamal/comparison-pipeline:latest
+          docker build --platform linux/amd64 --provenance=false \
+            -f lambda/comparison-pipeline/Dockerfile -t $IMAGE .
+          docker push $IMAGE
+
+      - name: Update Lambda
+        run: |
+          IMAGE=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/kamal/comparison-pipeline:latest
+          aws lambda update-function-code \
+            --function-name kamal-comparison-pipeline \
+            --image-uri $IMAGE \
+            --region ${{ env.AWS_REGION }}
+          aws lambda wait function-updated-v2 \
+            --function-name kamal-comparison-pipeline \
+            --region ${{ env.AWS_REGION }}
