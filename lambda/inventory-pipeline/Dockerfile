@@ -17,6 +17,7 @@ RUN playwright install chromium
 # Copy application code
 COPY inventory/bsale_client.py inventory/bsale_session.py inventory/pull_costs.py \
      inventory/generate_catalog.py inventory/upload_inventory.py \
+     files/download_files.py \
      lambda/inventory-pipeline/lambda_handler.py ./
 
 # Set Lambda handler

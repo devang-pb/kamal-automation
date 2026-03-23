@@ -4,7 +4,6 @@
 import logging
 import os
 import re
-import sys
 from pathlib import Path
 
 import requests
@@ -13,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL = "https://procwise.purpleblock.ai"
-DOWNLOAD_DIR = Path(__file__).parent / "downloads"
+DOWNLOAD_DIR = Path(os.environ.get("OUTPUT_DIR", Path(__file__).parent)) / "downloads"
 
 SKIP_IF_EXISTS = os.getenv("SKIP_IF_EXISTS", "1").lower() in ("1", "true", "yes")
 REPLACE_IF_EXISTS = os.getenv("REPLACE_IF_EXISTS", "0").lower() in ("1", "true", "yes")
@@ -51,7 +50,7 @@ def login(session: requests.Session, email: str, password: str) -> None:
     data = resp.json()
     if not data.get("success"):
         log.error("Login failed: %s", data)
-        sys.exit(1)
+        raise RuntimeError("Login failed")
     user_id = data.get("userId")
     if user_id and not session.cookies.get("userId"):
         session.cookies.set("userId", user_id, domain="procwise.purpleblock.ai", path="/")
@@ -223,7 +222,7 @@ def main() -> None:
     chirag_password = os.getenv("CHIRAG_PASSWORD")
     if not chirag_email or not chirag_password:
         log.error("CHIRAG_EMAIL / CHIRAG_PASSWORD not set in .env")
-        sys.exit(1)
+        raise RuntimeError("CHIRAG_EMAIL / CHIRAG_PASSWORD not set")
 
     dl_session = requests.Session()
     login(dl_session, chirag_email, chirag_password)
@@ -254,7 +253,7 @@ def main() -> None:
     procwise_password = os.getenv("PROCWISE_PASSWORD")
     if not procwise_email or not procwise_password:
         log.error("PROCWISE_EMAIL / PROCWISE_PASSWORD not set in .env")
-        sys.exit(1)
+        raise RuntimeError("PROCWISE_EMAIL / PROCWISE_PASSWORD not set")
 
     ul_session = requests.Session()
     login(ul_session, procwise_email, procwise_password)
