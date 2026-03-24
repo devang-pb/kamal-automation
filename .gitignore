@@ -2,3 +2,5 @@
 /output/
 /__pycache__/
 files/downloads/
+/inventory/output/
+/inventory/__pycache__/
