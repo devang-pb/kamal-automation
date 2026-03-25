@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """AWS Lambda handler — runs the full price comparison pipeline.
 
-Steps:
-  1. Download catalog.csv from S3
-  2. Run 3 scrapers in parallel (different sites, no conflict)
-  3. Run 6 Shopify compares sequentially (same Shopify API, avoid 429 storms)
-  4. Run 3 fuzzy matchers
-  5. Merge all comparisons
-  6. Upload results to S3
+Supports two modes via the event payload:
+
+  mode="full" (default):
+    Orchestrator — runs scrapers locally, invokes 2 worker instances of
+    itself for Shopify compares (3 stores each, sequential within each
+    worker), then runs fuzzy matchers, merge, and upload.
+
+  mode="shopify_worker":
+    Worker — runs the specified Shopify compares sequentially and uploads
+    the result CSVs to S3. Invoked by the orchestrator.
+
+This avoids 429 storms (all 6 Shopify stores concurrent = too many requests)
+while cutting total time from ~880s to ~330s by running the two worker
+Lambda instances in parallel with the scrapers.
 """
 
 import json
@@ -18,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 OUTPUT_DIR = "/tmp/output"
 os.environ["OUTPUT_DIR"] = OUTPUT_DIR
-os.environ["COMPARE_MAX_WORKERS"] = "6"  # Reduce threads per compare script
+os.environ["COMPARE_MAX_WORKERS"] = "6"  # Threads per compare script
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Configure logging for CloudWatch
@@ -30,6 +37,13 @@ if root.handlers:
 logger = logging.getLogger(__name__)
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "kamal-automation-data")
+FUNCTION_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "kamal-comparison-pipeline")
+
+# Map of store name → (compare script module, main function name)
+SHOPIFY_STORES = [
+    "cosmetic", "elite", "lodoro",
+    "multimarcas", "productos", "yauras",
+]
 
 
 def run_script(name, func):
@@ -44,61 +58,154 @@ def run_script(name, func):
         return (name, False, str(e))
 
 
+def _import_compare(store):
+    """Dynamically import a compare_<store> module and return its main()."""
+    mod = __import__(f"compare_{store}")
+    return mod.main
+
+
 def handler(event, context):
-    """Lambda entry point."""
+    """Lambda entry point — dispatches to worker or full pipeline."""
+    mode = event.get("mode", "full")
+    if mode == "shopify_worker":
+        return _shopify_worker(event)
+    return _full_pipeline(event, context)
+
+
+def _shopify_worker(event):
+    """Worker mode: run specified Shopify compares sequentially, upload to S3."""
     try:
-        # Step 1: Download catalog.csv from S3
-        logger.info("=== Step 1: Download catalog.csv from S3 ===")
         import boto3
         s3 = boto3.client("s3")
+        stores = event.get("stores", [])
+        logger.info("Worker starting: stores=%s", stores)
+
+        # Download catalog
         catalog_path = f"{OUTPUT_DIR}/catalog.csv"
         s3.download_file(S3_BUCKET, "catalog.csv", catalog_path)
         logger.info("Downloaded catalog.csv (%d bytes)", os.path.getsize(catalog_path))
 
-        # Step 2: Run 3 scrapers in parallel (different sites, no rate limit conflict)
-        logger.info("=== Step 2: Scrapers (parallel) ===")
+        # Run each store compare sequentially (avoids 429s)
+        results = []
+        for store in stores:
+            func = _import_compare(store)
+            results.append(run_script(f"compare_{store}", func))
+
+        # Upload result CSVs to S3
+        for store in stores:
+            filename = f"compare_{store}.csv"
+            filepath = f"{OUTPUT_DIR}/{filename}"
+            if os.path.exists(filepath):
+                s3.upload_file(filepath, S3_BUCKET, f"comparisons/{filename}")
+                logger.info("Uploaded %s to S3", filename)
+
+        failures = [n for n, ok, _ in results if not ok]
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"stores": stores, "failures": failures}),
+        }
+
+    except (Exception, SystemExit) as e:
+        logger.exception("Worker failed")
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)}),
+        }
+
+
+def _invoke_shopify_worker(lambda_client, stores):
+    """Synchronously invoke this Lambda in worker mode for a batch of stores."""
+    logger.info("Invoking worker for stores: %s", stores)
+    response = lambda_client.invoke(
+        FunctionName=FUNCTION_NAME,
+        InvocationType="RequestResponse",
+        Payload=json.dumps({"mode": "shopify_worker", "stores": stores}),
+    )
+    payload = json.loads(response["Payload"].read())
+    status = response.get("StatusCode", 0)
+    if status != 200 or payload.get("statusCode") != 200:
+        raise RuntimeError(f"Worker failed for {stores}: {payload}")
+    logger.info("Worker completed for stores: %s", stores)
+    return payload
+
+
+def _full_pipeline(event, context):
+    """Full pipeline: scrapers + 2 worker invocations + fuzzy + merge + upload."""
+    try:
+        import boto3
+        from botocore.config import Config
+
+        s3 = boto3.client("s3")
+        lambda_client = boto3.client(
+            "lambda",
+            config=Config(read_timeout=900, connect_timeout=10),
+        )
+
+        # Step 1: Download catalog.csv from S3
+        logger.info("=== Step 1: Download catalog.csv from S3 ===")
+        catalog_path = f"{OUTPUT_DIR}/catalog.csv"
+        s3.download_file(S3_BUCKET, "catalog.csv", catalog_path)
+        logger.info("Downloaded catalog.csv (%d bytes)", os.path.getsize(catalog_path))
+
+        # Step 2: Run scrapers + 2 Shopify worker Lambdas in parallel
+        # Scrapers run locally (3 threads). Shopify compares are offloaded to
+        # 2 separate Lambda instances (3 stores each, sequential within each)
+        # so they don't share the same process / rate limit pool.
+        logger.info("=== Step 2: Scrapers (local) + Shopify workers (2 Lambdas) ===")
         from scrape_sairam import run as sairam_scrape
         from scrape_paris import run as paris_scrape
         from scrape_lattafa import run as lattafa_scrape
 
-        scraper_results = []
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        all_results = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = {
-                executor.submit(run_script, name, func): name
-                for name, func in [
-                    ("scrape_sairam", sairam_scrape),
-                    ("scrape_paris", paris_scrape),
-                    ("scrape_lattafa", lattafa_scrape),
-                ]
+                # 3 scrapers (local)
+                executor.submit(run_script, "scrape_sairam", sairam_scrape): "scrape_sairam",
+                executor.submit(run_script, "scrape_paris", paris_scrape): "scrape_paris",
+                executor.submit(run_script, "scrape_lattafa", lattafa_scrape): "scrape_lattafa",
+                # 2 Shopify worker Lambdas (remote, 3 stores each)
+                executor.submit(
+                    _invoke_shopify_worker, lambda_client,
+                    ["cosmetic", "elite", "lodoro"],
+                ): "shopify_batch_1",
+                executor.submit(
+                    _invoke_shopify_worker, lambda_client,
+                    ["multimarcas", "productos", "yauras"],
+                ): "shopify_batch_2",
             }
             for future in as_completed(futures):
-                scraper_results.append(future.result())
+                name = futures[future]
+                try:
+                    result = future.result()
+                    if isinstance(result, tuple):
+                        # Scraper result: (name, success, error)
+                        all_results.append(result)
+                    else:
+                        # Worker result: dict with failures list
+                        worker_failures = result.get("body", "{}")
+                        if isinstance(worker_failures, str):
+                            worker_failures = json.loads(worker_failures)
+                        failed = worker_failures.get("failures", [])
+                        stores = worker_failures.get("stores", [])
+                        for store in stores:
+                            ok = f"compare_{store}" not in failed
+                            all_results.append((f"compare_{store}", ok, None if ok else "failed in worker"))
+                except Exception as e:
+                    logger.error("Task %s raised: %s", name, e)
+                    all_results.append((name, False, str(e)))
 
-        # Step 3: Run 6 Shopify compares sequentially
-        # Each site rate-limits independently, but running all 6 in parallel
-        # with threads causes 429 storms that slow everything down.
-        logger.info("=== Step 3: Shopify compares (sequential) ===")
-        from compare_cosmetic import main as cosmetic_main
-        from compare_elite import main as elite_main
-        from compare_lodoro import main as lodoro_main
-        from compare_multimarcas import main as multimarcas_main
-        from compare_productos import main as productos_main
-        from compare_yauras import main as yauras_main
+        # Step 3: Download Shopify compare results from S3
+        logger.info("=== Step 3: Download Shopify results from S3 ===")
+        for store in SHOPIFY_STORES:
+            filename = f"compare_{store}.csv"
+            local_path = f"{OUTPUT_DIR}/{filename}"
+            try:
+                s3.download_file(S3_BUCKET, f"comparisons/{filename}", local_path)
+                logger.info("Downloaded %s (%d bytes)", filename, os.path.getsize(local_path))
+            except Exception as e:
+                logger.error("Failed to download %s: %s", filename, e)
 
-        compare_results = []
-        for name, func in [
-            ("compare_cosmetic", cosmetic_main),
-            ("compare_elite", elite_main),
-            ("compare_lodoro", lodoro_main),
-            ("compare_multimarcas", multimarcas_main),
-            ("compare_productos", productos_main),
-            ("compare_yauras", yauras_main),
-        ]:
-            compare_results.append(run_script(name, func))
-
-        all_results = scraper_results + compare_results
-
-        # Step 4: Run fuzzy matchers
+        # Step 4: Run fuzzy matchers (depend on scraper output from step 2)
         logger.info("=== Step 4: Fuzzy matchers ===")
         from compare_sairam import main as sairam_compare
         from compare_paris import main as paris_compare
@@ -109,7 +216,7 @@ def handler(event, context):
             ("compare_paris", paris_compare),
             ("compare_lattafa", lattafa_compare),
         ]:
-            run_script(name, func)
+            all_results.append(run_script(name, func))
 
         # Step 5: Merge
         logger.info("=== Step 5: Merge comparisons ===")

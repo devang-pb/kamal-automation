@@ -19,7 +19,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-OUTPUT_DIR = Path(__file__).parent / "output"
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", Path(__file__).parent / "output"))
 REPORT_URL = "https://stock.bsale.app/gateway/stock/report.json"
 AHUMADA_OFFICE_ID = 3
 PAGE_LIMIT = 50

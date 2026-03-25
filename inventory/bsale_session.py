@@ -108,7 +108,14 @@ def get_session_cookie_from_env() -> str:
     """Get session cookie by logging in with credentials from environment variables.
 
     Uses BSALE_EMAIL and BSALE_PASSWORD from the environment / .env file.
+    If BSALE_SESSION_COOKIE is already set (e.g. by the Lambda handler to
+    avoid launching Playwright multiple times), returns that directly.
     """
+    cached = os.getenv("BSALE_SESSION_COOKIE")
+    if cached:
+        logger.info("Using cached BSale session cookie from environment.")
+        return cached
+
     email = os.getenv("BSALE_EMAIL")
     password = os.getenv("BSALE_PASSWORD")
     if not email or not password:

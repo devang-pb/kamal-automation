@@ -13,7 +13,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from bsale_client import BsaleClient
 
-OUTPUT_DIR = Path(__file__).parent / "output"
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", Path(__file__).parent / "output"))
 COSTANERA_OFFICE_ID = 6
 BASE_PRICE_LIST_ID = 2
 

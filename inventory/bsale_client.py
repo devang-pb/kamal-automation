@@ -36,7 +36,7 @@ class BsaleClient:
         url = f"{self.base_url}{path}"
         last_exc = None
 
-        for attempt in range(4):  # 1 initial + 3 retries
+        for attempt in range(8):  # 1 initial + 7 retries
             self._rate_limit()
             try:
                 resp = self.session.request(method, url, params=params)
@@ -55,8 +55,9 @@ class BsaleClient:
 
             if resp.status_code == 429:
                 retry_after = float(resp.headers.get("Retry-After", 2))
-                logger.warning(f"Rate limited (429), retrying after {retry_after}s")
-                time.sleep(retry_after)
+                wait = max(retry_after, min(2 ** attempt, 30))
+                logger.warning(f"Rate limited (429), retrying after {wait}s")
+                time.sleep(wait)
                 continue
 
             if resp.status_code >= 500:

@@ -54,6 +54,42 @@ aws lambda invoke --function-name kamal-inventory-pipeline \
   --invocation-type Event --region us-east-1 response.json
 ```
 
+### `comparison-pipeline/`
+Runs the price comparison pipeline: scrapes 3 competitor sites, compares prices across 6 Shopify stores, runs fuzzy matchers, merges results, and uploads to ProcWise + S3.
+
+| Property | Value |
+|----------|-------|
+| **Function name** | `kamal-comparison-pipeline` |
+| **Runtime** | Container image (Python 3.12) |
+| **Timeout** | 900s (15 min) |
+| **Memory** | 2048 MB |
+| **Typical duration** | ~330s (orchestrator) |
+| **Triggered by** | `kamal-inventory-pipeline` (morning run only) |
+| **ECR repo** | `021891608382.dkr.ecr.us-east-1.amazonaws.com/kamal/comparison-pipeline` |
+
+#### Architecture
+The handler supports two modes via the event payload:
+
+- **`mode="full"`** (default) — Orchestrator: runs 3 scrapers locally while invoking 2 worker instances of itself (3 Shopify stores each). After all complete, runs fuzzy matchers, merge, and upload.
+- **`mode="shopify_worker"`** — Worker: runs specified Shopify compares sequentially, uploads CSVs to S3. Invoked by the orchestrator via sync `lambda:Invoke`.
+
+This self-invoking pattern avoids 429 rate limits (running all 6 Shopify stores in parallel triggers Shopify-level throttling) while cutting total time from ~880s to ~330s.
+
+#### Build & Deploy
+Build from the **project root** (not from this folder):
+```bash
+docker build --platform linux/amd64 --provenance=false \
+  -f lambda/comparison-pipeline/Dockerfile \
+  -t 021891608382.dkr.ecr.us-east-1.amazonaws.com/kamal/comparison-pipeline:latest .
+
+docker push 021891608382.dkr.ecr.us-east-1.amazonaws.com/kamal/comparison-pipeline:latest
+
+aws lambda update-function-code \
+  --function-name kamal-comparison-pipeline \
+  --image-uri 021891608382.dkr.ecr.us-east-1.amazonaws.com/kamal/comparison-pipeline:latest \
+  --region us-east-1
+```
+
 ## AWS Resources (shared)
 
 | Resource | Name |
