@@ -92,6 +92,7 @@ def get_thread_session() -> requests.Session:
 def request_with_retry(session: requests.Session, url: str, params=None):
     for attempt in range(MAX_RETRIES):
         try:
+            time.sleep(0.15)  # Throttle to avoid 429s
             r = session.get(url, params=params, headers=HEADERS, timeout=30)
 
             if r.status_code == 429:

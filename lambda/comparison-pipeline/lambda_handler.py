@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 OUTPUT_DIR = "/tmp/output"
 os.environ["OUTPUT_DIR"] = OUTPUT_DIR
-os.environ["COMPARE_MAX_WORKERS"] = "6"  # Threads per compare script
+os.environ["COMPARE_MAX_WORKERS"] = "3"  # Threads per compare script (low to avoid 429s)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Configure logging for CloudWatch
@@ -78,7 +78,11 @@ def _shopify_worker(event):
         import boto3
         s3 = boto3.client("s3")
         stores = event.get("stores", [])
-        logger.info("Worker starting: stores=%s", stores)
+        # Allow per-worker concurrency override for rate-limited sites
+        worker_threads = event.get("max_workers")
+        if worker_threads:
+            os.environ["COMPARE_MAX_WORKERS"] = str(worker_threads)
+        logger.info("Worker starting: stores=%s, threads=%s", stores, os.environ.get("COMPARE_MAX_WORKERS"))
 
         # Download catalog
         catalog_path = f"{OUTPUT_DIR}/catalog.csv"
@@ -113,13 +117,16 @@ def _shopify_worker(event):
         }
 
 
-def _invoke_shopify_worker(lambda_client, stores):
+def _invoke_shopify_worker(lambda_client, stores, max_workers=None):
     """Synchronously invoke this Lambda in worker mode for a batch of stores."""
-    logger.info("Invoking worker for stores: %s", stores)
+    logger.info("Invoking worker for stores: %s (threads=%s)", stores, max_workers or "default")
+    payload = {"mode": "shopify_worker", "stores": stores}
+    if max_workers:
+        payload["max_workers"] = max_workers
     response = lambda_client.invoke(
         FunctionName=FUNCTION_NAME,
         InvocationType="RequestResponse",
-        Payload=json.dumps({"mode": "shopify_worker", "stores": stores}),
+        Payload=json.dumps(payload),
     )
     payload = json.loads(response["Payload"].read())
     status = response.get("StatusCode", 0)
@@ -157,21 +164,31 @@ def _full_pipeline(event, context):
         from scrape_lattafa import run as lattafa_scrape
 
         all_results = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=9) as executor:
             futures = {
                 # 3 scrapers (local)
                 executor.submit(run_script, "scrape_sairam", sairam_scrape): "scrape_sairam",
                 executor.submit(run_script, "scrape_paris", paris_scrape): "scrape_paris",
                 executor.submit(run_script, "scrape_lattafa", lattafa_scrape): "scrape_lattafa",
-                # 2 Shopify worker Lambdas (remote, 3 stores each)
+                # 6 Shopify worker Lambdas (1 store each to fit within 900s)
                 executor.submit(
-                    _invoke_shopify_worker, lambda_client,
-                    ["cosmetic", "elite", "lodoro"],
-                ): "shopify_batch_1",
+                    _invoke_shopify_worker, lambda_client, ["cosmetic"],
+                ): "shopify_cosmetic",
                 executor.submit(
-                    _invoke_shopify_worker, lambda_client,
-                    ["multimarcas", "productos", "yauras"],
-                ): "shopify_batch_2",
+                    _invoke_shopify_worker, lambda_client, ["elite"],
+                ): "shopify_elite",
+                executor.submit(
+                    _invoke_shopify_worker, lambda_client, ["lodoro"], 2,
+                ): "shopify_lodoro",
+                executor.submit(
+                    _invoke_shopify_worker, lambda_client, ["multimarcas"],
+                ): "shopify_multimarcas",
+                executor.submit(
+                    _invoke_shopify_worker, lambda_client, ["productos"], 2,
+                ): "shopify_productos",
+                executor.submit(
+                    _invoke_shopify_worker, lambda_client, ["yauras"], 2,
+                ): "shopify_yauras",
             }
             for future in as_completed(futures):
                 name = futures[future]
