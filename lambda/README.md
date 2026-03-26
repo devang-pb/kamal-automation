@@ -63,17 +63,18 @@ Runs the price comparison pipeline: scrapes 3 competitor sites, compares prices 
 | **Runtime** | Container image (Python 3.12) |
 | **Timeout** | 900s (15 min) |
 | **Memory** | 2048 MB |
-| **Typical duration** | ~330s (orchestrator) |
-| **Triggered by** | `kamal-inventory-pipeline` (morning run only) |
+| **Typical duration** | ~246s (dispatch), ~7s (merge), ~500-750s (workers) |
+| **Triggered by** | `kamal-inventory-pipeline` (morning dispatch) + EventBridge (morning merge) |
 | **ECR repo** | `021891608382.dkr.ecr.us-east-1.amazonaws.com/kamal/comparison-pipeline` |
 
-#### Architecture
-The handler supports two modes via the event payload:
+#### Architecture (two-phase pipeline)
+The handler supports three modes via the event payload:
 
-- **`mode="full"`** (default) — Orchestrator: runs 3 scrapers locally while invoking 2 worker instances of itself (3 Shopify stores each). After all complete, runs fuzzy matchers, merge, and upload.
-- **`mode="shopify_worker"`** — Worker: runs specified Shopify compares sequentially, uploads CSVs to S3. Invoked by the orchestrator via sync `lambda:Invoke`.
+- **`mode="full"`** (default) — Dispatch phase: runs 3 scrapers locally, fires 6 async Shopify worker Lambdas (1 per store), uploads scraper results to S3. Completes in ~4 min.
+- **`mode="shopify_worker"`** — Worker: runs one Shopify store compare, uploads CSV to S3. Each worker gets its own 900s budget. Rate-limited stores (lodoro, productos, yauras) use 2 threads; others use 3, with 0.15s per-request throttle to avoid 429s.
+- **`mode="merge"`** — Merge phase: downloads all CSVs from S3, runs fuzzy matchers (sairam, paris, lattafa), merges everything, uploads to ProcWise + S3. Completes in ~7s. Triggered by EventBridge at 8:55 AM Chile (25 min after dispatch).
 
-This self-invoking pattern avoids 429 rate limits (running all 6 Shopify stores in parallel triggers Shopify-level throttling) while cutting total time from ~880s to ~330s.
+This two-phase pattern ensures no single Lambda is close to the 900s timeout. Workers run independently with their full budget, and the merge runs only after all workers have completed.
 
 #### Build & Deploy
 Build from the **project root** (not from this folder):
@@ -90,6 +91,18 @@ aws lambda update-function-code \
   --region us-east-1
 ```
 
+#### Invoke
+```bash
+# Dispatch (scrapers + fire workers) — async
+aws lambda invoke --function-name kamal-comparison-pipeline \
+  --invocation-type Event --region us-east-1 response.json
+
+# Merge (after workers are done) — sync
+aws lambda invoke --function-name kamal-comparison-pipeline \
+  --cli-read-timeout 60 --cli-binary-format raw-in-base64-out \
+  --payload '{"mode":"merge"}' --region us-east-1 response.json
+```
+
 ## AWS Resources (shared)
 
 | Resource | Name |
@@ -99,3 +112,4 @@ aws lambda update-function-code \
 | **CloudWatch Log Group** | `/aws/lambda/kamal-inventory-pipeline` |
 | **EventBridge Schedule** | `kamal-inventory-morning` (8:30 AM Chile) |
 | **EventBridge Schedule** | `kamal-inventory-afternoon` (4:30 PM Chile) |
+| **EventBridge Schedule** | `kamal-comparison-merge-morning` (8:55 AM Chile) |
