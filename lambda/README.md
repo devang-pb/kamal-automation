@@ -72,7 +72,7 @@ The handler supports three modes via the event payload:
 
 - **`mode="full"`** (default) — Dispatch phase: runs 3 scrapers locally, fires 6 async Shopify worker Lambdas (1 per store), uploads scraper results to S3. Completes in ~4 min.
 - **`mode="shopify_worker"`** — Worker: runs one Shopify store compare, uploads CSV to S3. Each worker gets its own 900s budget. Rate-limited stores (lodoro, productos, yauras) use 2 threads; others use 3, with 0.15s per-request throttle to avoid 429s.
-- **`mode="merge"`** — Merge phase: downloads all CSVs from S3, runs fuzzy matchers (sairam, paris, lattafa), merges everything, uploads to ProcWise + S3. Completes in ~7s. Triggered by EventBridge at 8:55 AM Chile (25 min after dispatch).
+- **`mode="merge"`** — Merge phase: downloads all CSVs from S3, runs fuzzy matchers (sairam, paris, lattafa), merges everything, uploads to ProcWise + S3. Completes in ~7s. Triggered by EventBridge at 8:45 AM Chile (15 min after dispatch).
 
 This two-phase pattern ensures no single Lambda is close to the 900s timeout. Workers run independently with their full budget, and the merge runs only after all workers have completed.
 
@@ -112,4 +112,4 @@ aws lambda invoke --function-name kamal-comparison-pipeline \
 | **CloudWatch Log Group** | `/aws/lambda/kamal-inventory-pipeline` |
 | **EventBridge Schedule** | `kamal-inventory-morning` (8:30 AM Chile) |
 | **EventBridge Schedule** | `kamal-inventory-afternoon` (4:30 PM Chile) |
-| **EventBridge Schedule** | `kamal-comparison-merge-morning` (8:55 AM Chile) |
+| **EventBridge Schedule** | `kamal-comparison-merge-morning` (8:45 AM Chile) |
