@@ -208,8 +208,8 @@ def main():
                 executor.map(process_row, master), 1
             ):
                 w.writerow([barcode, price, stock])
-                found = "FOUND" if price != "" else "-"
-                print(f"[{i}/{total}] {found}: {name}")
+                if i % 500 == 0 or i == total:
+                    print(f"[{i}/{total}] processed")
 
     print(f"\nDone! {total} rows saved to {OUTPUT_FILE}")
 
