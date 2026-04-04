@@ -1,0 +1,2 @@
+the new lambda must refernce the scripts in the extra-comparisons folder
+It must first run "get_missing_products.py" (which will output missing_products.csv). then use the "missing_products.csv and run the 6 shopify compare scripts, then run the 3 fuzzy matcher compare scripts (these fuzzy matcher compare scripts will use scrape_*.csv from the previous lambda), then finally run merge_comparisons.py, and save the final results
