@@ -25,5 +25,8 @@ COPY inventory/pull_costs_costanera.py inventory/pull_costs_ahumada.py inventory
      inventory/generate_catalog_costanera.py inventory/generate_catalog_ahumada.py inventory/generate_catalog_providencia.py \
      inventory/upload_inventory_costanera.py inventory/upload_inventory_ahumada.py inventory/upload_inventory_providencia.py ./
 
+# Copy inventory diff and email report modules
+COPY inventory/inventory_diff.py inventory/send_report.py ./
+
 # Set Lambda handler
 CMD ["lambda_handler.handler"]

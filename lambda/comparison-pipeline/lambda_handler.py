@@ -287,6 +287,14 @@ def _merge_phase(event):
                 logger.info("Uploaded %s", filename)
 
         failures = [(n, e) for n, ok, e in results if not ok]
+
+        # Step 7: Send email report with full comparison data
+        logger.info("=== Merge Step 7: Sending email report ===")
+        try:
+            from send_comparison_report import send_comparison_report
+            send_comparison_report(failures)
+        except Exception as e:
+            logger.error("Failed to send comparison report: %s", e, exc_info=True)
         summary = {
             "phase": "merge",
             "files_downloaded": len(downloaded),

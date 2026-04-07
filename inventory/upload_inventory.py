@@ -10,6 +10,8 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+from inventory_diff import InventoryDiff, fetch_current_inventory, compute_diff
+
 load_dotenv()
 
 BASE_URL = "https://procwise.purpleblock.ai"
@@ -81,7 +83,7 @@ def upload_inventory(session: requests.Session, items: list[dict]) -> None:
         sys.exit(1)
 
 
-def main() -> None:
+def main() -> InventoryDiff | None:
     if not CSV_PATH.exists():
         log.error("CSV not found: %s", CSV_PATH)
         sys.exit(1)
@@ -94,8 +96,18 @@ def main() -> None:
 
     session = requests.Session()
     login(session)
+
+    # Fetch current inventory and compute diff before uploading
+    try:
+        old_items = fetch_current_inventory(session)
+        diff = compute_diff(old_items, items, warehouse="Gorbea")
+    except Exception as e:
+        log.warning("Could not compute diff: %s", e)
+        diff = None
+
     send_column_map(session, rows)
     upload_inventory(session, items)
+    return diff
 
 
 if __name__ == "__main__":

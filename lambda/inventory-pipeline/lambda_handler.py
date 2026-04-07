@@ -7,9 +7,10 @@ Steps:
      → Gorbea (main), Costanera, Ahumada, Providencia
      → all share the same Playwright BSale session cookie
   3. generate_catalog (all warehouses in parallel)
-  4. upload_inventory (all warehouses in parallel)
+  4. upload_inventory (all warehouses in parallel, with diff detection)
   5. Upload main catalog.csv to S3 for the comparison pipeline
   6. Trigger comparison pipeline (morning run only)
+  7. Send email report with inventory diffs via AWS SES
 """
 
 import json
@@ -36,15 +37,15 @@ WAREHOUSES = ["costanera", "ahumada", "providencia"]
 
 
 def run_step(name, func):
-    """Run a step and return (name, success, error)."""
+    """Run a step and return (name, success, error, result)."""
     try:
         logger.info("Starting %s", name)
-        func()
+        result = func()
         logger.info("Completed %s", name)
-        return (name, True, None)
+        return (name, True, None, result)
     except Exception as e:
         logger.error("Failed %s: %s", name, e, exc_info=True)
-        return (name, False, str(e))
+        return (name, False, str(e), None)
 
 
 def run_parallel(tasks):
@@ -122,6 +123,9 @@ def handler(event, context):
 
         all_results = cost_results + catalog_results + upload_results
 
+        # Collect inventory diffs from upload results
+        inventory_diffs = [r[3] for r in upload_results if r[3] is not None]
+
         # Step 5: Upload main catalog.csv to S3 for the comparison pipeline
         s3_bucket = os.environ.get("S3_BUCKET", "kamal-automation-data")
         if s3_bucket:
@@ -143,9 +147,17 @@ def handler(event, context):
             )
             logger.info("Comparison pipeline triggered (async)")
 
-        failures = [(n, e) for n, ok, e in all_results if not ok]
+        failures = [(n, e) for n, ok, e, _ in all_results if not ok]
         if failures:
             logger.warning("Some steps failed: %s", [n for n, _ in failures])
+
+        # Step 7: Send email report with inventory diffs
+        logger.info("=== Step 7: Sending email report ===")
+        try:
+            from send_report import send_report
+            send_report(inventory_diffs, failures)
+        except Exception as e:
+            logger.error("Failed to send report email: %s", e, exc_info=True)
 
         return {
             "statusCode": 200,
