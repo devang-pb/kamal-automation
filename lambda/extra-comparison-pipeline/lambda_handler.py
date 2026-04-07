@@ -11,6 +11,7 @@ Pipeline:
   4. 3 fuzzy matchers      (sairam, paris, lattafa — use scrape_*.csv)
   5. merge_comparisons     → extra_merged_comparisons.csv
   6. Upload results to S3
+  7. upload_missing_products → POST to ProcWise /api/retail-intel/missing-products
 
 Supports three modes:
   mode="full"  (default) — runs get_missing_products, fires 6 Shopify workers,
@@ -266,6 +267,11 @@ def _merge_phase(event):
                 filepath = f"{OUTPUT_DIR}/{filename}"
                 s3.upload_file(filepath, S3_BUCKET, f"{S3_PREFIX}/{filename}")
                 logger.info("Uploaded %s", filename)
+
+        # Step 7: Upload extra_merged_comparisons.csv to ProcWise missing-products endpoint
+        logger.info("=== Merge Step 7: upload_missing_products ===")
+        from upload_missing_products import main as upload_missing_products_main
+        upload_missing_products_main()
 
         failures = [(n, e) for n, ok, e in results if not ok]
         summary = {

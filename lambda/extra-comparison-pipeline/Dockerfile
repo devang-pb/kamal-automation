@@ -11,6 +11,7 @@ COPY extra-comparisons/get_missing_products.py \
      extra-comparisons/compare_productos.py extra-comparisons/compare_yauras.py \
      extra-comparisons/compare_lattafa.py extra-comparisons/compare_paris.py \
      extra-comparisons/compare_sairam.py extra-comparisons/merge_comparisons.py \
+     extra-comparisons/upload_missing_products.py \
      ./
 
 # Copy handler
