@@ -32,6 +32,7 @@ TARGET_SUPPLIERS = {
     "Yauras",
     "Productos de Lujo VIP",
     "Cosmetic Mayorista",
+    "Miami Trading Zone",
 }
 
 logging.basicConfig(

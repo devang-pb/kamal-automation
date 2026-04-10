@@ -60,7 +60,11 @@ def send_column_map(session: requests.Session, rows: list[dict]) -> None:
 def build_items(rows: list[dict]) -> list[dict]:
     items = []
     for row in rows:
-        cost = round(float(row["avg_cost"]))
+        avg_cost = (row.get("avg_cost") or "").strip()
+        if not avg_cost:
+            log.warning("Skipping row with missing avg_cost: ean=%s sku=%s", row.get("ean"), row.get("sku"))
+            continue
+        cost = round(float(avg_cost))
         items.append({
             "name": row["name"],
             "ean": row["ean"],
